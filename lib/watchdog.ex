@@ -29,11 +29,15 @@ defmodule Solo.Watchdog do
 
   @impl GenServer
   def handle_info({ref, :join, group, pids}, %{pg: ref, name: group} = state) do
+    Logger.debug("[♚] #{Enum.count(pids)} process(es) joined group #{inspect(group)}")
+
     Enum.each(pids, &Process.monitor/1)
     {:noreply, state}
   end
 
   def handle_info({ref, :leave, group, pids}, %{pg: ref, name: group} = state) do
+    Logger.debug("[♚] #{Enum.count(pids)} process(es) left group #{inspect(group)}")
+
     workers =
       Enum.reduce(pids, state.workers, fn pid, acc ->
         {id, acc} = Map.pop!(acc, pid)
@@ -49,6 +53,8 @@ defmodule Solo.Watchdog do
 
   @impl GenServer
   def handle_info({:DOWN, _, :process, pid, :normal}, %{workers: %{} = workers} = state) do
+    Logger.debug("[♚] #{inspect(pid)} (#{inspect(Map.get(workers, pid))}) is down as ‹:normal›")
+
     workers = Map.delete(workers, pid)
 
     if workers == %{},
@@ -56,11 +62,9 @@ defmodule Solo.Watchdog do
       else: {:noreply, %{state | workers: workers}}
   end
 
-  def handle_info({:DOWN, _, :process, pid, _reason}, %{} = state) do
-    # Managed process exited with an error. Try restarting, after a delay
-    # Process.sleep(:rand.uniform(1_000) + 1_000)
-
-    id = Map.get(state.workers, pid)
+  def handle_info({:DOWN, _, :process, pid, reason}, %{workers: %{} = workers} = state) do
+    id = Map.get(workers, pid)
+    Logger.debug("[♚] #{inspect(pid)} (#{inspect(id)}) is down as ‹#{reason}›")
 
     state =
       case maybe_restart_child(id, state) do
@@ -72,10 +76,11 @@ defmodule Solo.Watchdog do
   end
 
   defp maybe_restart_child(id, state) do
-    with {_, pid, _, _} <- Solo.find(state.supervisor, id),
+    with {_, pid, _, _} when is_pid(pid) <- Solo.find(state.supervisor, id),
          true <- :rpc.call(node(pid), :erlang, :is_process_alive, [pid]) do
       pid
     else
+      # {_, :undefined, _, _} -> when in Supervisor.terminate_child/2
       _ -> restart_child(id, state)
     end
   end
@@ -90,13 +95,15 @@ defmodule Solo.Watchdog do
         restart_child(id, state)
 
       {:ok, pid} ->
+        Logger.debug("[♚] restarting child #{inspect(id)} (group #{inspect(group)})")
         if node(pid) == node(), do: :pg.join(group, [pid])
         pid
 
       {:error, reason} ->
         # raise Solo.UnreliableChild, id: id, reason: reason
         Logger.warning(
-          "Error restarting child ‹" <> inspect(id) <> "›, reason: ‹" <> inspect(reason) <> "›"
+          "[♚] error restarting child ‹" <>
+            inspect(id) <> "›, reason: ‹" <> inspect(reason) <> "›"
         )
 
         nil

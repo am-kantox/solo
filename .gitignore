@@ -26,3 +26,5 @@ solo-*.tar
 /tmp/
 
 /.elixir-tools/
+
+/.dialyzer/dialyzer.plt*

@@ -1,6 +1,31 @@
 defmodule Solo do
   @moduledoc """
-  Documentation for `Solo`.
+  `Solo` is the library to turn parts of the existing supervision trees into singletons.
+
+  Consider the application having the following children specified somewhere in the supervision tree.
+
+  ```elixir
+  children = [
+    Foo,
+    {Bar, [bar_arg]},
+    {Baz, [baz_arg]},
+    ...
+  ]
+  ```
+
+  and there is a necessity to make `Bar` and `Baz` processes singletons across the cluster.
+  Simply wrap the specs in question into `Solo.global/2` and you are all set.
+
+  ```elixir
+  children = [
+    Foo,
+    Solo.global(SoloBarBaz, [
+      {Bar, [bar_arg]},
+      {Baz, [baz_arg]}
+    ],
+    ...
+  ]
+  ```
   """
 
   defmodule UnsupportedName do
@@ -26,12 +51,12 @@ defmodule Solo do
   defmodule UnreliableChild do
     @moduledoc false
 
-    defexception [:reason, :id, :message]
+    defexception [:action, :reason, :id, :message]
 
     @impl true
-    def message(%{message: nil, id: id, reason: reason}) do
+    def message(%{message: nil, id: id, reason: reason, action: action}) do
       """
-      Could not restart the child (id: #{inspect(id)}) with reason: #{inspect(reason)}
+      Could not #{action} the child (id: #{inspect(id)}) with reason: #{inspect(reason)}
       """
     end
 
@@ -42,9 +67,7 @@ defmodule Solo do
 
   use Supervisor
 
-  @doc """
-  """
-
+  @doc false
   def start_link(children, opts \\ []) do
     {name, _opts} = Keyword.pop(opts, :name, __MODULE__)
 
@@ -53,7 +76,7 @@ defmodule Solo do
         pid
         |> Supervisor.which_children()
         |> Enum.reduce(%{workers: %{}}, fn
-          {Solo.Watchdog, pid, _, _}, acc -> Map.put(acc, :watchdog, pid)
+          {Watchdog, pid, _, _}, acc -> Map.put(acc, :watchdog, pid)
           {:pg, pid, _, _}, acc -> Map.put(acc, :pg, pid)
           {worker, pid, _, _}, acc -> put_in(acc, [:workers, pid], worker)
         end)
@@ -65,7 +88,17 @@ defmodule Solo do
     end
   end
 
+  @doc "Helper to make parts of the supervision tree a global distributed singleton"
+  def global(name \\ __MODULE__, children) do
+    %{
+      id: {Solo, name},
+      start: {Solo, :start_link, [children, name: name]},
+      type: :supervisor
+    }
+  end
+
   @impl Supervisor
+  @doc false
   def init(children) do
     Supervisor.init(
       [%{id: :pg, start: {__MODULE__, :start_pg, []}}, Watchdog | children_specs(children)],
@@ -73,16 +106,19 @@ defmodule Solo do
     )
   end
 
+  @doc false
   def start_pg do
     with {:error, {:already_started, _pid}} <- :pg.start_link(), do: :ignore
   end
 
-  def find(pid, id) do
-    pid
+  @doc false
+  def find(solo, id) do
+    solo
     |> Supervisor.which_children()
     |> Enum.find(&match?({^id, _, _, _}, &1))
   end
 
+  @doc false
   def children_specs(children) do
     Enum.map(children, &transform_child_spec/1)
   end
@@ -101,6 +137,7 @@ defmodule Solo do
     pids |> Enum.reject(&(&1 == :undefined)) |> Enum.split_with(&(:erlang.node(&1) == this))
   end
 
+  @doc false
   def start_child(mod, fun, [[{name, _} | _] = args]) when is_atom(name) do
     name =
       case Keyword.get(args, :name) do
@@ -117,7 +154,7 @@ defmodule Solo do
 
   def whereis(name), do: :global.whereis_name(name)
 
-  def state do
-    with {_, pid, _, _} <- Solo.find(Solo, Solo.Watchdog), do: GenServer.call(pid, :state)
+  def state(solo \\ __MODULE__) do
+    with {_, pid, _, _} <- Solo.find(solo, Watchdog), do: GenServer.call(pid, :state)
   end
 end

@@ -2,7 +2,7 @@
 
 ## Objective
 
-This library might be handy when one needs to keep a sigleton across the cluster with zero downtime.
+This library might be handy when one needs to keep a singleton across the cluster with zero downtime.
 Consider the application needs to collect some data from the external source when the only one 
 connection is allowed. If for some reason the node running a connection goes down, the takeover
 from other node should have happened. In the old good days we used native _erlang_ 
@@ -18,12 +18,12 @@ Simply wrap the specs into `Solo.global/2` call and you are all set.
 
 ```elixir
 children = [
-Foo,
-Solo.global(SoloBarBaz, [
-  {Bar, [bar_arg]},
-  {Baz, [baz_arg]}
-],
-...
+  Foo,
+  Solo.global(SoloBarBaz, [
+    {Bar, [bar_arg]},
+    {Baz, [baz_arg]}
+  ],
+  ...
 ]
 ```
 

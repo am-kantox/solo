@@ -88,6 +88,7 @@ defmodule Solo do
     end
   end
 
+  @doc section: :interface
   @doc """
   Helper to make parts of the supervision tree a global distributed singleton.
 
@@ -109,7 +110,7 @@ defmodule Solo do
   running `Solo` supervisor with `Solo.state/1`, although this is usually not
   a demanded feature.
 
-  To lookup the named processes turned into `Solo`, use `Solo.whereis/2`,
+  To lookup the named processes turned into `Solo`, use `Solo.whereis/1`,
   passing the respective id (`SoloBarBaz`) and the actual name of the process.
   """
   def global(name \\ __MODULE__, children) do
@@ -127,6 +128,11 @@ defmodule Solo do
       [%{id: :pg, start: {__MODULE__, :start_pg, []}}, Watchdog | children_specs(children)],
       strategy: :one_for_one
     )
+  end
+
+  @doc false
+  def child_spec(args) do
+    super(args)
   end
 
   @doc false
@@ -177,12 +183,14 @@ defmodule Solo do
   defp unwind_keyword([kw]) when is_list(kw), do: unwind_keyword(kw)
   defp unwind_keyword(kw) when is_list(kw), do: kw
 
+  @doc section: :helpers
   @doc """
   Looks the process with the name given as the first parameter up.
   """
   @spec whereis(name :: atom()) :: pid()
   def whereis(name), do: :global.whereis_name(name)
 
+  @doc section: :helpers
   @doc """
   Returns the state of the `Solo` from this node’s perspective (pids of workers
   might be remote.)

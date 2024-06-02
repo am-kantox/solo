@@ -2,7 +2,7 @@ defmodule Solo.MixProject do
   use Mix.Project
 
   @app :solo
-  @version "0.1.0"
+  @version "0.2.0"
 
   def project do
     [
@@ -84,13 +84,17 @@ defmodule Solo.MixProject do
 
   defp docs do
     [
-      main: "Solo",
+      main: "readme",
       source_ref: "v#{@version}",
       canonical: "http://hexdocs.pm/#{@app}",
       logo: "stuff/#{@app}-48x48.png",
       source_url: "https://github.com/am-kantox/#{@app}",
       extras: ~w[README.md],
-      groups_for_modules: []
+      groups_for_modules: [],
+      groups_for_docs: [
+        Interface: &(&1[:section] == :interface),
+        Shenanigans: &(&1[:section] == :helpers)
+      ]
     ]
   end
 

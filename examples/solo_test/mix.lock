@@ -1,0 +1,3 @@
+%{
+  "doctest_formatter": {:hex, :doctest_formatter, "0.3.0", "19da9fd0d9d1e895f86d7508f1962d8a16393277f73aba1066dddb3d2adcdfc8", [:mix], [], "hexpm", "485f4dab4fc65ecf18aa342d285b393db16814d828caa671c42f9f781b68cf5a"},
+}

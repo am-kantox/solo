@@ -88,11 +88,34 @@ defmodule Solo do
     end
   end
 
-  @doc "Helper to make parts of the supervision tree a global distributed singleton"
+  @doc """
+  Helper to make parts of the supervision tree a global distributed singleton.
+
+  Simply wrap the parts of any supervision tree with a call to `Solo.global/2`
+  and you ar eall set.
+
+  ```elixir
+  children = [
+    Foo,
+    Solo.global(SoloBarBaz, [
+      {Bar, [bar_arg]},
+      {Baz, [baz_arg]}
+    ],
+    ...
+  ]
+  ```
+
+  The name (`SoloBarBaz`) above might be used later to check the state of the
+  running `Solo` supervisor with `Solo.state/1`, although this is usually not
+  a demanded feature.
+
+  To lookup the named processes turned into `Solo`, use `Solo.whereis/2`,
+  passing the respective id (`SoloBarBaz`) and the actual name of the process.
+  """
   def global(name \\ __MODULE__, children) do
     %{
       id: {Solo, name},
-      start: {Solo, :start_link, [children, name: name]},
+      start: {Solo, :start_link, [children, [name: name]]},
       type: :supervisor
     }
   end
@@ -138,7 +161,7 @@ defmodule Solo do
   end
 
   @doc false
-  def start_child(mod, fun, [[{name, _} | _] = args]) when is_atom(name) do
+  def start_child(mod, fun, args) do
     name =
       case Keyword.get(args, :name) do
         nil -> {:global, mod}
@@ -146,14 +169,30 @@ defmodule Solo do
         {:via, reg, id} -> raise UnsupportedName, reg: reg, id: id
       end
 
-    # [AM] make sure (maybe with a custom compiler) name is used by the underlying `mod.fun/n`
-    args = Keyword.put(args, :name, name)
-
+    args = args |> unwind_keyword() |> Keyword.put(:name, name)
     with {:error, {:already_started, pid}} <- apply(mod, fun, [args]), do: {:ok, pid}
   end
 
+  @spec unwind_keyword(keyword() | [keyword()]) :: keyword()
+  defp unwind_keyword([kw]) when is_list(kw), do: unwind_keyword(kw)
+  defp unwind_keyword(kw) when is_list(kw), do: kw
+
+  @doc """
+  Looks the process with the name given as the first parameter up.
+  """
+  @spec whereis(name :: atom()) :: pid()
   def whereis(name), do: :global.whereis_name(name)
 
+  @doc """
+  Returns the state of the `Solo` from this node’s perspective (pids of workers
+  might be remote.)
+  """
+  @spec state(solo :: atom()) :: %{
+          name: atom(),
+          supervisor: pid(),
+          pg: reference(),
+          workers: %{optional(pid()) => atom()}
+        }
   def state(solo \\ __MODULE__) do
     with {_, pid, _, _} <- Solo.find(solo, Watchdog), do: GenServer.call(pid, :state)
   end

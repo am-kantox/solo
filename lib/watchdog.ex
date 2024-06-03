@@ -7,12 +7,19 @@ defmodule Solo.Watchdog do
 
   def start_link(opts \\ []) do
     {name, opts} = Keyword.split(opts, [:name])
-    GenServer.start_link(__MODULE__, Map.new(opts), name)
+
+    opts =
+      opts
+      |> Map.new()
+      |> Map.put_new(:timer, 0)
+
+    GenServer.start_link(__MODULE__, opts, name)
   end
 
   @impl GenServer
   def init(state) do
-    {:ok, state}
+    scheduled = state |> Map.fetch!(:timer) |> schedule_work()
+    {:ok, Map.put(state, :scheduled, scheduled)}
   end
 
   @impl GenServer
@@ -75,6 +82,31 @@ defmodule Solo.Watchdog do
     {:noreply, state}
   end
 
+  def handle_info(:work, %{workers: workers} = state) do
+    workers
+    |> Solo.split_local_pids()
+    |> elem(0)
+    |> Enum.reject(&(&1 |> elem(0) |> Process.alive?()))
+    |> case do
+      [] ->
+        :ok
+
+      ids ->
+        Logger.error(
+          Solo.UnreliableChild.message(%Solo.UnreliableChild{
+            id: ids,
+            action: :lookup,
+            reason: :not_alive
+          })
+        )
+
+        Solo.revalidate(state.name, state.supervisor)
+    end
+
+    scheduled = state |> Map.fetch!(:timer) |> schedule_work()
+    {:noreply, Map.put(state, :scheduled, scheduled)}
+  end
+
   defp maybe_restart_child(id, state) do
     with {_, pid, _, _} when is_pid(pid) <- Solo.find(state.supervisor, id),
          true <- :rpc.call(node(pid), :erlang, :is_process_alive, [pid]) do
@@ -109,4 +141,8 @@ defmodule Solo.Watchdog do
         nil
     end
   end
+
+  @spec schedule_work(timeout :: integer()) :: reference()
+  defp schedule_work(timeout) when not is_integer(timeout) or timeout <= 0, do: make_ref()
+  defp schedule_work(timeout), do: Process.send_after(self(), :work, timeout)
 end

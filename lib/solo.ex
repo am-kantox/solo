@@ -72,18 +72,7 @@ defmodule Solo do
     {name, _opts} = Keyword.pop(opts, :name, __MODULE__)
 
     with {:ok, pid} <- Supervisor.start_link(__MODULE__, children, name: name) do
-      %{watchdog: watchdog, pg: _pg, workers: workers} =
-        pid
-        |> Supervisor.which_children()
-        |> Enum.reduce(%{workers: %{}}, fn
-          {Watchdog, pid, _, _}, acc -> Map.put(acc, :watchdog, pid)
-          {:pg, pid, _, _}, acc -> Map.put(acc, :pg, pid)
-          {worker, pid, _, _}, acc -> put_in(acc, [:workers, pid], worker)
-        end)
-
-      GenServer.cast(watchdog, {:refs, %{workers: workers, supervisor: pid, name: name}})
-      :pg.join(name, workers |> Map.keys() |> split_local_pids() |> elem(0))
-
+      revalidate(name, pid)
       {:ok, pid}
     end
   end
@@ -113,10 +102,10 @@ defmodule Solo do
   To lookup the named processes turned into `Solo`, use `Solo.whereis/1`,
   passing the respective id (`SoloBarBaz`) and the actual name of the process.
   """
-  def global(name \\ __MODULE__, children) do
+  def global(name \\ __MODULE__, children, opts \\ [timer: 1_000]) do
     %{
       id: {Solo, name},
-      start: {Solo, :start_link, [children, [name: name]]},
+      start: {Solo, :start_link, [children, Keyword.put_new(opts, :name, name)]},
       type: :supervisor
     }
   end
@@ -128,6 +117,22 @@ defmodule Solo do
       [%{id: :pg, start: {__MODULE__, :start_pg, []}}, Watchdog | children_specs(children)],
       strategy: :one_for_one
     )
+  end
+
+  @doc false
+  @spec revalidate(module(), pid()) :: :ok
+  def revalidate(name, pid) when is_pid(pid) do
+    %{watchdog: watchdog, pg: _pg, workers: workers} =
+      pid
+      |> Supervisor.which_children()
+      |> Enum.reduce(%{workers: %{}}, fn
+        {Watchdog, pid, _, _}, acc -> Map.put(acc, :watchdog, pid)
+        {:pg, pid, _, _}, acc -> Map.put(acc, :pg, pid)
+        {worker, pid, _, _}, acc -> put_in(acc, [:workers, pid], worker)
+      end)
+
+    GenServer.cast(watchdog, {:refs, %{workers: workers, supervisor: pid, name: name}})
+    :pg.join(name, workers |> Map.keys() |> split_local_pids() |> elem(0))
   end
 
   @doc false
@@ -161,9 +166,20 @@ defmodule Solo do
   defp transform_child_spec(mod) when is_atom(mod),
     do: mod.child_spec() |> transform_child_spec()
 
-  defp split_local_pids(pids) do
+  @doc false
+  @spec split_local_pids(arg) :: {arg, arg} when arg: [pid]
+  def split_local_pids(pids) when is_list(pids) do
     this = node()
     pids |> Enum.reject(&(&1 == :undefined)) |> Enum.split_with(&(:erlang.node(&1) == this))
+  end
+
+  @spec split_local_pids(arg) :: {arg, arg} when arg: %{optional(pid) => module()}
+  def split_local_pids(pids_ids) when is_map(pids_ids) do
+    this = node()
+
+    pids_ids
+    |> Map.reject(&match?({:undefined, _}, &1))
+    |> Map.split_with(&(this == &1 |> elem(0) |> :erlang.node()))
   end
 
   @doc false

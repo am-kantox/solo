@@ -105,7 +105,7 @@ defmodule Solo do
   def global(name \\ __MODULE__, children, opts \\ [timer: 1_000]) do
     %{
       id: {Solo, name},
-      start: {Solo, :start_link, [children, Keyword.put_new(opts, :name, name)]},
+      start: {Solo, :start_link, [children, Keyword.put_new(opts, :name, {:global, name})]},
       type: :supervisor
     }
   end

@@ -157,8 +157,8 @@ defmodule Solo do
     Enum.map(children, &transform_child_spec/1)
   end
 
-  defp transform_child_spec(%{start: {mod, fun, args}} = spec),
-    do: %{spec | start: {Solo, :start_child, [mod, fun, args]}}
+  defp transform_child_spec(%{id: id, start: {mod, fun, args}} = spec),
+    do: %{spec | id: sup_name(id), start: {Solo, :start_child, [mod, fun, args]}}
 
   defp transform_child_spec({mod, args}) when is_atom(mod),
     do: args |> mod.child_spec() |> transform_child_spec()
@@ -186,25 +186,32 @@ defmodule Solo do
   def start_child(mod, fun, args) do
     name =
       case Keyword.get(args, :name) do
-        nil -> {:global, mod}
-        name when is_atom(name) -> {:global, name}
+        nil -> {:global, Module.concat(mod, Sup)}
+        {:global, name} when is_atom(name) -> {:global, sup_name(name)}
+        name when is_atom(name) -> {:global, sup_name(name)}
         {:via, reg, id} -> raise UnsupportedName, reg: reg, id: id
       end
 
-    args = args |> unwind_keyword() |> Keyword.put(:name, name)
-    with {:error, {:already_started, pid}} <- apply(mod, fun, [args]), do: {:ok, pid}
+    children = [%{id: mod, start: {mod, fun, args}}]
+
+    with {:error, {:already_started, pid}} <-
+           Solo.Supervised.start_link(children: children, name: name),
+         do: {:ok, pid}
   end
 
-  @spec unwind_keyword(keyword() | [keyword()]) :: keyword()
-  defp unwind_keyword([kw]) when is_list(kw), do: unwind_keyword(kw)
-  defp unwind_keyword(kw) when is_list(kw), do: kw
+  @doc false
+  def sup_name(mod) when is_atom(mod), do: Module.concat(mod, Sup)
 
   @doc section: :helpers
   @doc """
   Looks the process with the name given as the first parameter up.
   """
   @spec whereis(name :: atom()) :: pid()
-  def whereis(name), do: :global.whereis_name(name)
+  def whereis(name) do
+    with [{^name, pid, _, _}] <-
+           name |> sup_name() |> :global.whereis_name() |> Supervisor.which_children(),
+         do: pid
+  end
 
   @doc section: :helpers
   @doc """

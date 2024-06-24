@@ -2,7 +2,7 @@ defmodule Solo.MixProject do
   use Mix.Project
 
   @app :solo
-  @version "0.4.1"
+  @version "0.4.2"
 
   def project do
     [
